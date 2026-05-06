@@ -1007,7 +1007,7 @@ const peopleCountBadgePosition = computed(() => {
 const startPeopleCountAutoRefresh = () => {
   stopPeopleCountAutoRefresh()
   loadFloorPlanPeopleCount()
-  peopleCountRefreshInterval.value = setInterval(loadFloorPlanPeopleCount, 30000)
+  peopleCountRefreshInterval.value = setInterval(loadFloorPlanPeopleCount, refreshIntervals.peopleCountIntervalMs)
 }
 
 const stopPeopleCountAutoRefresh = () => {
@@ -2395,24 +2395,6 @@ const stopSensorDataAutoRefresh = () => {
   if (sensorDataRefreshInterval.value) {
     clearInterval(sensorDataRefreshInterval.value)
     sensorDataRefreshInterval.value = null
-  }
-}
-
-// --- Auto-refresh: people count overlay ---
-const peopleCountRefreshInterval = ref(null)
-
-const startPeopleCountAutoRefresh = () => {
-  if (peopleCountRefreshInterval.value) {
-    clearInterval(peopleCountRefreshInterval.value)
-  }
-  fetchImageProcessingPeopleCount()
-  peopleCountRefreshInterval.value = setInterval(fetchImageProcessingPeopleCount, refreshIntervals.peopleCountIntervalMs)
-}
-
-const stopPeopleCountAutoRefresh = () => {
-  if (peopleCountRefreshInterval.value) {
-    clearInterval(peopleCountRefreshInterval.value)
-    peopleCountRefreshInterval.value = null
   }
 }
 
