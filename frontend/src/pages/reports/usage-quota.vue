@@ -57,6 +57,32 @@ const safeValue = (val) => {
   return s
 }
 
+const TIME_SLUGS = new Set(['booking-start', 'booking-end'])
+
+const TIME_PLACEHOLDERS = {
+  'booking-start': '08:00',
+  'booking-end': '17:00',
+}
+
+const isTimeSlug = (slug) => TIME_SLUGS.has(slug)
+
+const isValidTimeString = (val) => {
+  if (val == null || String(val).trim() === '') return false
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(val).trim())
+}
+
+const normalizeTimeForSave = (val) => {
+  const s = String(val ?? '').trim()
+  if (!s) return ''
+  const m = s.match(/^(\d{1,2}):(\d{2})$/)
+  if (!m) return s
+  const h = Number(m[1])
+  const mm = Number(m[2])
+  if (!Number.isFinite(h) || !Number.isFinite(mm)) return s
+  if (h < 0 || h > 23 || mm < 0 || mm > 59) return s
+  return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+}
+
 const fetchQuotaSettings = async () => {
   loading.value = true
   try {
@@ -140,15 +166,26 @@ const confirmSave = async () => {
 }
 
 const saveSetting = async (setting) => {
-  // Check if value has changed
+  if (isTimeSlug(setting.slug)) {
+    const normalized = normalizeTimeForSave(editedValues[setting.id])
+    if (!normalized) {
+      showSnackbar('กรุณาระบุเวลาในรูปแบบ HH:MM', 'error')
+      return
+    }
+    if (!isValidTimeString(normalized)) {
+      showSnackbar('รูปแบบเวลาไม่ถูกต้อง (ตัวอย่าง 08:00, 17:30)', 'error')
+      return
+    }
+    editedValues[setting.id] = normalized
+  }
+
   if (editedValues[setting.id] === (setting.value || '')) {
     showSnackbar('ไม่มีการเปลี่ยนแปลงค่า', 'info')
     return
   }
-  
+
   savingSettings[setting.id] = true
-  
-  // Show confirmation dialog
+
   showConfirmDialog(setting)
 }
 
@@ -237,6 +274,8 @@ onMounted(() => {
                         :id="'setting-' + setting.id"
                         v-model="editedValues[setting.id]"
                         type="text"
+                        :placeholder="isTimeSlug(setting.slug) ? TIME_PLACEHOLDERS[setting.slug] : ''"
+                        :inputmode="isTimeSlug(setting.slug) ? 'numeric' : 'text'"
                         variant="outlined"
                         density="compact"
                         class="setting-field"

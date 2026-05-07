@@ -27,21 +27,57 @@ const endDate = ref(moment().format('YYYY-MM-DD'))
 const dateRangeInput = ref(null)
 const bookings = ref([])
 
-// Time slots เหมือนโปรเจกต์เก่า (old): 07:00–17:00 (20 ช่อง) — ไม่เกิน 17:00 จึงไม่มีคอลัมน์/ไอคอน + ส่วนเกิน
-const timeSlots = (() => {
+const displaySettings = ref({
+  bookingStart: '07:00',
+  bookingEnd: '17:00',
+  bookingAheadDay: 30,
+})
+
+const normalizeTime = (value, fallback) => {
+  const text = String(value ?? '').trim()
+  if (!/^\d{1,2}:\d{2}$/.test(text)) return fallback
+  const [h, m] = text.split(':').map(Number)
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return fallback
+  if (h < 0 || h > 23 || m < 0 || m > 59) return fallback
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+const buildTimeSlots = (startTime, endTime) => {
+  const start = normalizeTime(startTime, '07:00')
+  const end = normalizeTime(endTime, '17:00')
+  const [startH, startM] = start.split(':').map(Number)
+  const [endH, endM] = end.split(':').map(Number)
+  const startMin = startH * 60 + startM
+  const endMin = endH * 60 + endM
+
+  if (!Number.isFinite(startMin) || !Number.isFinite(endMin) || endMin <= startMin) return []
+
   const slots = []
-  for (let h = 7; h < 17; h++) {
-    slots.push({ start: `${String(h).padStart(2, '0')}:00`, end: `${String(h).padStart(2, '0')}:30` })
-    slots.push({ start: `${String(h).padStart(2, '0')}:30`, end: `${String(h + 1).padStart(2, '0')}:00` })
+  for (let minute = startMin; minute < endMin; minute += 30) {
+    const nextMinute = minute + 30
+    if (nextMinute > endMin) break
+    const sh = Math.floor(minute / 60)
+    const sm = minute % 60
+    const eh = Math.floor(nextMinute / 60)
+    const em = nextMinute % 60
+    slots.push({
+      start: `${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`,
+      end: `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`,
+    })
   }
   return slots
-})()
+}
 
-// รายการเวลาในฟอร์มการจอง (dropdown) — 07:00 ถึง 17:00
-const timeOptionsForForm = (() => {
-  const times = [...new Set(timeSlots.flatMap(s => [s.start, s.end]))].sort()
+const timeSlots = computed(() => {
+  const slots = buildTimeSlots(displaySettings.value.bookingStart, displaySettings.value.bookingEnd)
+  return slots.length > 0 ? slots : buildTimeSlots('07:00', '17:00')
+})
+
+// รายการเวลาในฟอร์มการจอง (dropdown) — อิงช่วงเวลาจากค่าโควต้า
+const timeOptionsForForm = computed(() => {
+  const times = [...new Set(timeSlots.value.flatMap(s => [s.start, s.end]))].sort()
   return times.map(t => ({ title: t, value: t }))
-})()
+})
 
 // Date range for table
 const dateRange = computed(() => {
@@ -180,14 +216,15 @@ const timeToMinutes = (t) => {
 
 // End index is the first slot whose start >= endTime; if endTime exceeds table -> timeSlots.length
 const getEndSlotIndex = (endTime) => {
+  const slots = timeSlots.value
   const endMin = timeToMinutes(endTime)
   if (endMin == null) return -1
-  for (let i = 0; i < timeSlots.length; i++) {
-    const slotMin = timeToMinutes(timeSlots[i]?.start)
+  for (let i = 0; i < slots.length; i++) {
+    const slotMin = timeToMinutes(slots[i]?.start)
     if (slotMin == null) continue
     if (slotMin >= endMin) return i
   }
-  return timeSlots.length
+  return slots.length
 }
 
 // Same logic as calendar: filter by room, date, time, cancel/reject, and status + room auto_approve
@@ -238,9 +275,10 @@ const getBookingForSlot = (roomId, date, time) => {
     const end = parseDt(b.end_datetime || b.end || b.end_time)
     if (!start || start.date !== date) return false
     // Check if time slot is within booking range
-    const slotMin = timeSlots.findIndex(s => s.start === time)
+    const slots = timeSlots.value
+    const slotMin = slots.findIndex(s => s.start === time)
     if (slotMin < 0) return false
-    const startMin = timeSlots.findIndex(s => s.start === start.time)
+    const startMin = slots.findIndex(s => s.start === start.time)
     if (startMin < 0) return false
     const endSlotIndex = end ? getEndSlotIndex(end.time) : (startMin + 1)
     const safeEndSlotIndex = endSlotIndex > startMin ? endSlotIndex : (startMin + 1)
@@ -277,7 +315,8 @@ const getBookingSpan = (roomId, date, time) => {
   const start = parseDt(b.start_datetime || b.start || b.start_time)
   const end = parseDt(b.end_datetime || b.end || b.end_time)
   if (!start || !end) return 1
-  const si = timeSlots.findIndex(s => s.start === start.time)
+  const slots = timeSlots.value
+  const si = slots.findIndex(s => s.start === start.time)
   if (si < 0) return 1
   const ei = getEndSlotIndex(end.time)
   const safeEi = ei > si ? ei : (si + 1)
@@ -289,7 +328,8 @@ const getBookingSpan = (roomId, date, time) => {
 const isSlotPartOfBooking = (roomId, date, time) => {
   const room = allRooms.value.find(r => String(r.id) === String(roomId))
   const roomAutoApprove = room ? (room.auto_approve === 1 || room.auto_approve === true) : false
-  const timeIndex = timeSlots.findIndex(s => s.start === time)
+  const slots = timeSlots.value
+  const timeIndex = slots.findIndex(s => s.start === time)
   if (timeIndex < 0) return false
   for (const b of bookings.value) {
     const rid = b.room_id ?? b.room?.id ?? b.room
@@ -320,7 +360,7 @@ const isSlotPartOfBooking = (roomId, date, time) => {
     const bStart = parseDt(b.start_datetime || b.start || b.start_time)
     const bEnd = parseDt(b.end_datetime || b.end || b.end_time)
     if (!bStart || bStart.date !== date) continue
-    const startIndex = timeSlots.findIndex(s => s.start === bStart.time)
+    const startIndex = slots.findIndex(s => s.start === bStart.time)
     if (startIndex < 0) continue
     const endSlotIndex = bEnd ? getEndSlotIndex(bEnd.time) : (startIndex + 1)
     const safeEndSlotIndex = endSlotIndex > startIndex ? endSlotIndex : (startIndex + 1)
@@ -331,8 +371,9 @@ const isSlotPartOfBooking = (roomId, date, time) => {
 
 // ช่องที่ต้องแสดงในแถว (ไม่รวมช่องที่อยู่ภายในการจอง) — ใช้กับ v-for แทน v-if+v-for
 const getVisibleSlotItems = (roomId, date) => {
+  const slots = timeSlots.value
   const items = []
-  for (const slot of timeSlots) {
+  for (const slot of slots) {
     if (!slot || slot.start == null) continue
     if (isBookingStartSlot(roomId, date, slot.start)) {
       items.push({ slot, colspan: getBookingSpan(roomId, date, slot.start) })
@@ -663,6 +704,22 @@ const fetchRooms = async () => {
   }
 }
 
+const fetchBookingDisplaySettings = async () => {
+  try {
+    const response = await api.get('/bookings/display-settings')
+    const data = response?.data?.data || {}
+    const bookingAheadDay = Number(data.bookingAheadDay)
+
+    displaySettings.value = {
+      bookingStart: normalizeTime(data.bookingStart, '07:00'),
+      bookingEnd: normalizeTime(data.bookingEnd, '17:00'),
+      bookingAheadDay: Number.isFinite(bookingAheadDay) && bookingAheadDay > 0 ? bookingAheadDay : 30,
+    }
+  } catch (error) {
+    console.warn('[Available] Failed to load display settings:', error?.message)
+  }
+}
+
 // เหมือน calendar.vue: GET /bookings/calendar พร้อม params start, end
 const fetchBookings = async () => {
   try {
@@ -720,14 +777,16 @@ const onRoomToggle = (roomId, checked) => {
 }
 
 // ——— Date range picker ———
-// Same as calendar: fixed 30 days ahead (no quota API)
+// อิง booking-ahead-day จากโควต้า (fallback 30 วัน)
 const initDateRangePicker = () => {
   nextTick(() => {
     if (!dateRangeInput.value) return
     if (typeof window !== 'undefined') {
       window.moment = window.moment || moment
     }
-    const maxDays = isSuperAdmin.value ? 365 : 30
+    const maxDays = isSuperAdmin.value
+      ? Math.max(365, Number(displaySettings.value.bookingAheadDay) || 30)
+      : (Number(displaySettings.value.bookingAheadDay) || 30)
     const el = dateRangeInput.value
     const $input = $(el)
     if ($input.data('daterangepicker')) {
@@ -751,6 +810,7 @@ const initDateRangePicker = () => {
 // ลำดับเหมือน calendar.vue: โหลด rooms ก่อน → ตั้งค่า picker → โหลด bookings
 onMounted(async () => {
   moment.locale('th')
+  await fetchBookingDisplaySettings()
   await fetchRooms()
   initDateRangePicker()
   await fetchBookings()

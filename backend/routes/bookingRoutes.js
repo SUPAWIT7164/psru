@@ -6,6 +6,7 @@ const { authenticate, isApprover } = require('../middleware/auth');
 // Public routes
 router.get('/calendar', bookingController.getCalendarData);
 router.get('/today', bookingController.getTodayBookings);
+router.get('/display-settings', bookingController.getDisplaySettings);
 
 // Protected routes
 router.use(authenticate);

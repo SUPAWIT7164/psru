@@ -1,7 +1,56 @@
 const Booking = require('../models/Booking');
 const Approver = require('../models/Approver');
+const { pool } = require('../config/database');
 
 class BookingController {
+    // Get booking display settings (public safe subset)
+    async getDisplaySettings(req, res) {
+        const defaults = {
+            bookingStart: '07:00',
+            bookingEnd: '17:00',
+            bookingAheadDay: 30,
+        };
+
+        try {
+            const [rows] = await pool.query(`
+                SELECT slug, value
+                FROM settings
+                WHERE module_id = 1
+                  AND disable = 0
+                  AND slug IN ('booking-start', 'booking-end', 'booking-ahead-day')
+            `);
+
+            const map = {};
+            for (const row of rows || []) {
+                if (row && row.slug) map[row.slug] = row.value;
+            }
+
+            const ahead = Number(map['booking-ahead-day']);
+
+            return res.json({
+                success: true,
+                data: {
+                    bookingStart: map['booking-start'] || defaults.bookingStart,
+                    bookingEnd: map['booking-end'] || defaults.bookingEnd,
+                    bookingAheadDay: Number.isFinite(ahead) && ahead > 0 ? ahead : defaults.bookingAheadDay,
+                },
+            });
+        } catch (error) {
+            const noTable = error.code === 'ER_NO_SUCH_TABLE' ||
+                (error.message && /Invalid object name 'settings'|does not exist/i.test(error.message));
+
+            if (noTable) {
+                return res.json({ success: true, data: defaults });
+            }
+
+            return res.status(500).json({
+                success: false,
+                message: 'เกิดข้อผิดพลาดในการดึงค่าตั้งค่าตารางเวลา',
+                error: error.message,
+            });
+        }
+    }
+
     // Get calendar data
     async getCalendarData(req, res) {
         try {
